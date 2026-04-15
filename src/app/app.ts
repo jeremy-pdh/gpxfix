@@ -3,6 +3,7 @@ import {
   ChangeDetectionStrategy,
   Component,
   ElementRef,
+  OnDestroy,
   computed,
   effect,
   signal,
@@ -16,7 +17,9 @@ import {
   type GpxTrack,
   type LatLon,
   type RouteLeg,
+  type SpeedSample,
   type TrackPoint,
+  buildSpeedSamples,
   buildCorrectedTrackPoints,
   computeGapCandidates,
   computeLegDurations,
@@ -61,7 +64,7 @@ interface OsrmRouteResponse {
     class: 'app-shell',
   },
 })
-export class App implements AfterViewInit {
+export class App implements AfterViewInit, OnDestroy {
   protected readonly fileInputRef = viewChild.required<ElementRef<HTMLInputElement>>('fileInput');
   protected readonly mapHostRef = viewChild.required<ElementRef<HTMLElement>>('mapHost');
 
@@ -77,6 +80,8 @@ export class App implements AfterViewInit {
   );
   protected readonly errorMessage = signal<string | null>(null);
   protected readonly sourceFileName = signal<string>('');
+  protected readonly chartZoomRatio = signal(1);
+  protected readonly chartPanRatio = signal(0);
 
   protected readonly gapCandidates = computed(() => {
     const track = this.track();
@@ -135,6 +140,91 @@ export class App implements AfterViewInit {
   });
   protected readonly hasUsableTrack = computed(() => this.track() !== null);
   protected readonly hasCorrections = computed(() => this.sortedCorrections().length > 0);
+  protected readonly originalSpeedSamples = computed(() => {
+    const track = this.track();
+    return track ? buildSpeedSamples(track.points) : [];
+  });
+  protected readonly correctedSpeedSamples = computed(() => buildSpeedSamples(this.correctedPoints()));
+  protected readonly chartMetrics = computed(() => {
+    const originalSamples = this.originalSpeedSamples();
+    const correctedSamples = this.correctedSpeedSamples();
+    const samples = [...originalSamples, ...correctedSamples].sort(
+      (left, right) => left.elapsedSeconds - right.elapsedSeconds,
+    );
+
+    if (samples.length === 0) {
+      return null;
+    }
+
+    const maxElapsedSeconds = samples.at(-1)?.elapsedSeconds ?? 0;
+    const baseMaxSpeed = samples.reduce((maxSpeed, sample) => {
+      return Math.max(maxSpeed, sample.speedKph);
+    }, 0);
+    const zoomRatio = this.chartZoomRatio();
+    const spanRatio = 1 / zoomRatio;
+    const maxPanRatio = Math.max(1 - spanRatio, 0);
+    const panRatio = Math.min(this.chartPanRatio(), maxPanRatio);
+    const windowStartSeconds = maxElapsedSeconds * panRatio;
+    const windowElapsedSeconds = maxElapsedSeconds * spanRatio;
+    const windowEndSeconds = Math.min(windowStartSeconds + windowElapsedSeconds, maxElapsedSeconds);
+    const visibleSamples = samples.filter((sample) => {
+      return sample.elapsedSeconds >= windowStartSeconds && sample.elapsedSeconds <= windowEndSeconds;
+    });
+    const fallbackSamples = visibleSamples.length > 1 ? visibleSamples : samples;
+    const maxSpeed = Math.max(
+      fallbackSamples.reduce((candidate, sample) => Math.max(candidate, sample.speedKph), 0),
+      baseMaxSpeed * 0.15,
+      5,
+    );
+
+    return {
+      maxElapsedSeconds,
+      maxSpeed,
+      windowStartSeconds,
+      windowEndSeconds,
+      visibleRangeHasSamples: fallbackSamples.length > 0,
+      spanRatio,
+      maxPanRatio,
+    };
+  });
+  protected readonly originalSpeedChartPath = computed(() => {
+    const metrics = this.chartMetrics();
+    return metrics ? this.buildChartPath(this.originalSpeedSamples(), metrics) : '';
+  });
+  protected readonly correctedSpeedChartPath = computed(() => {
+    const metrics = this.chartMetrics();
+    return metrics ? this.buildChartPath(this.correctedSpeedSamples(), metrics) : '';
+  });
+  protected readonly correctedSpeedChartAreaPath = computed(() => {
+    const metrics = this.chartMetrics();
+
+    if (!metrics) {
+      return '';
+    }
+
+    const visibleSamples = this.getVisibleChartSamples(this.correctedSpeedSamples(), metrics);
+
+    if (visibleSamples.length === 0) {
+      return '';
+    }
+
+    const path = this.correctedSpeedChartPath();
+    if (!path) {
+      return '';
+    }
+
+    const width = 960;
+    const height = 240;
+    const firstSample = visibleSamples[0];
+    const lastSample = visibleSamples.at(-1);
+    const elapsedSpan = Math.max(metrics.windowEndSeconds - metrics.windowStartSeconds, 1);
+    const firstX = ((firstSample.elapsedSeconds - metrics.windowStartSeconds) / elapsedSpan) * width;
+    const lastX = ((lastSample?.elapsedSeconds ?? firstSample.elapsedSeconds) - metrics.windowStartSeconds) / elapsedSpan * width;
+
+    return `${path} L ${lastX.toFixed(2)} ${height} L ${firstX.toFixed(2)} ${height} Z`;
+  });
+
+  private resizeObserver: ResizeObserver | null = null;
 
   private map: L.Map | null = null;
   private overlayLayer = L.layerGroup();
@@ -165,6 +255,11 @@ export class App implements AfterViewInit {
 
   ngAfterViewInit(): void {
     this.initializeMap(this.mapHostRef().nativeElement);
+  }
+
+  ngOnDestroy(): void {
+    this.resizeObserver?.disconnect();
+    this.map?.remove();
   }
 
   protected async onFileSelected(event: Event): Promise<void> {
@@ -327,7 +422,7 @@ export class App implements AfterViewInit {
     return formatDistance(value);
   }
 
-  protected formatDuration(value: number | null): string {
+  protected formatDuration(value: number | null | undefined): string {
     return formatDuration(value);
   }
 
@@ -337,6 +432,70 @@ export class App implements AfterViewInit {
 
   protected segmentLabel(gap: GapCandidate): string {
     return `Points ${gap.startIndex + 1} -> ${gap.endIndex + 1}`;
+  }
+
+  protected onChartZoomInput(event: Event): void {
+    const nextZoom = Number.parseFloat((event.target as HTMLInputElement).value);
+
+    if (!Number.isFinite(nextZoom)) {
+      return;
+    }
+
+    this.chartZoomRatio.set(Math.min(Math.max(nextZoom, 1), 24));
+    this.clampChartPan();
+  }
+
+  protected onChartPanInput(event: Event): void {
+    const nextPan = Number.parseFloat((event.target as HTMLInputElement).value);
+
+    if (!Number.isFinite(nextPan)) {
+      return;
+    }
+
+    this.chartPanRatio.set(Math.min(Math.max(nextPan, 0), 1));
+    this.clampChartPan();
+  }
+
+  protected zoomSpeedChart(direction: 'in' | 'out'): void {
+    const factor = direction === 'in' ? 1.6 : 1 / 1.6;
+    this.chartZoomRatio.update((value) => Math.min(Math.max(value * factor, 1), 24));
+    this.clampChartPan();
+  }
+
+  protected visibleTimeRangeLabel(): string {
+    const metrics = this.chartMetrics();
+    return metrics
+      ? `${this.formatElapsedTime(metrics.windowStartSeconds)} -> ${this.formatElapsedTime(metrics.windowEndSeconds)}`
+      : 'n/a';
+  }
+
+  protected maxSpeedLabel(): string {
+    const metrics = this.chartMetrics();
+    return metrics ? `${metrics.maxSpeed.toFixed(1)} km/h` : 'n/a';
+  }
+
+  protected chartStartTimeLabel(): string {
+    const metrics = this.chartMetrics();
+    return metrics ? this.formatElapsedTime(metrics.windowStartSeconds) : '0 s';
+  }
+
+  protected chartMidTimeLabel(): string {
+    const metrics = this.chartMetrics();
+
+    if (!metrics) {
+      return '0 s';
+    }
+
+    return this.formatElapsedTime((metrics.windowStartSeconds + metrics.windowEndSeconds) / 2);
+  }
+
+  protected chartEndTimeLabel(): string {
+    const metrics = this.chartMetrics();
+    return metrics ? this.formatElapsedTime(metrics.windowEndSeconds) : '0 s';
+  }
+
+  protected hasSpeedChart(): boolean {
+    return this.originalSpeedSamples().length > 1 || this.correctedSpeedSamples().length > 1;
   }
 
   private async loadTrackFile(file: File): Promise<void> {
@@ -349,6 +508,8 @@ export class App implements AfterViewInit {
       this.corrections.set({});
       this.sourceFileName.set(file.name.replace(/\.gpx$/i, ''));
       this.selectedGapStartIndex.set(null);
+      this.chartZoomRatio.set(1);
+      this.chartPanRatio.set(0);
       this.hasFittedTrack = false;
       this.statusMessage.set(
         `${parsedTrack.points.length} points importes. Selectionnez un saut a corriger dans la liste.`,
@@ -387,6 +548,12 @@ export class App implements AfterViewInit {
 
       void this.addWaypoint(event.latlng);
     });
+
+    this.resizeObserver = new ResizeObserver(() => {
+      this.invalidateMapSize();
+    });
+    this.resizeObserver.observe(mapHost);
+    this.invalidateMapSize();
   }
 
   private refreshMap(): void {
@@ -483,6 +650,8 @@ export class App implements AfterViewInit {
       this.fitCoordinates(correctedPoints.length > 1 ? correctedPoints : track.points);
       this.hasFittedTrack = true;
     }
+
+    this.invalidateMapSize();
   }
 
   private async addWaypoint(latLng: L.LatLng): Promise<void> {
@@ -688,6 +857,7 @@ export class App implements AfterViewInit {
     }
 
     const bounds = L.latLngBounds(this.toLatLngTuples(points));
+    this.invalidateMapSize();
     this.map.fitBounds(bounds.pad(0.2), { maxZoom });
   }
 
@@ -712,5 +882,83 @@ export class App implements AfterViewInit {
 
   private safeFileStem(): string {
     return this.sourceFileName() || 'activity';
+  }
+
+  private formatElapsedTime(totalSeconds: number): string {
+    const roundedSeconds = Math.max(0, Math.round(totalSeconds));
+    const hours = Math.floor(roundedSeconds / 3600);
+    const minutes = Math.floor((roundedSeconds % 3600) / 60);
+    const seconds = roundedSeconds % 60;
+
+    if (hours > 0) {
+      return `${hours}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+    }
+
+    return `${minutes}:${seconds.toString().padStart(2, '0')}`;
+  }
+
+  private invalidateMapSize(): void {
+    if (!this.map) {
+      return;
+    }
+
+    requestAnimationFrame(() => {
+      this.map?.invalidateSize({ pan: false, debounceMoveend: true });
+    });
+  }
+
+  private clampChartPan(): void {
+    const metrics = this.chartMetrics();
+
+    if (!metrics) {
+      this.chartPanRatio.set(0);
+      return;
+    }
+
+    this.chartPanRatio.update((value) => Math.min(value, metrics.maxPanRatio));
+  }
+
+  private buildChartPath(
+    samples: SpeedSample[],
+    metrics: {
+      maxSpeed: number;
+      windowStartSeconds: number;
+      windowEndSeconds: number;
+    },
+  ): string {
+    const visibleSamples = this.getVisibleChartSamples(samples, metrics);
+
+    if (visibleSamples.length === 0) {
+      return '';
+    }
+
+    const width = 960;
+    const height = 240;
+    const elapsedSpan = Math.max(metrics.windowEndSeconds - metrics.windowStartSeconds, 1);
+
+    return visibleSamples
+      .map((sample, index) => {
+        const x = ((sample.elapsedSeconds - metrics.windowStartSeconds) / elapsedSpan) * width;
+        const y = height - (sample.speedKph / metrics.maxSpeed) * height;
+        return `${index === 0 ? 'M' : 'L'} ${x.toFixed(2)} ${y.toFixed(2)}`;
+      })
+      .join(' ');
+  }
+
+  private getVisibleChartSamples(
+    samples: SpeedSample[],
+    metrics: {
+      windowStartSeconds: number;
+      windowEndSeconds: number;
+    },
+  ): SpeedSample[] {
+    const visibleSamples = samples.filter((sample) => {
+      return (
+        sample.elapsedSeconds >= metrics.windowStartSeconds &&
+        sample.elapsedSeconds <= metrics.windowEndSeconds
+      );
+    });
+
+    return visibleSamples.length > 1 ? visibleSamples : samples;
   }
 }

@@ -238,24 +238,115 @@
       }
     </aside>
 
-    <section class="map-panel panel">
-      <div class="map-heading">
-        <div>
-          <h2>Carte d'edition</h2>
-          <p>Trace originale en gris, correction exportee en orange.</p>
+    <section class="canvas-column">
+      <section class="speed-panel panel">
+        <div class="subpanel-heading">
+          <div>
+            <h2>Graphique de vitesse</h2>
+            <p>Temps sur l'axe horizontal, vitesse lissee sur ±15 secondes sur l'axe vertical.</p>
+          </div>
+          @if (hasSpeedChart()) {
+            <div class="chart-quick-stats">
+              <span>Fenetre {{ visibleTimeRangeLabel() }}</span>
+              <span>Max {{ maxSpeedLabel() }}</span>
+            </div>
+          }
         </div>
-        <div class="legend">
-          <span><i class="legend-dot legend-original"></i>Original</span>
-          <span><i class="legend-dot legend-corrected"></i>Corrige</span>
+
+        @if (hasSpeedChart()) {
+          <div class="speed-panel-content">
+            <div class="chart-legend" aria-hidden="true">
+              <span><i class="legend-dot legend-original"></i>Vitesse originale</span>
+              <span><i class="legend-dot legend-corrected"></i>Vitesse corrigee proposee</span>
+            </div>
+
+            <div class="chart-toolbar">
+              <button type="button" class="secondary-button" (click)="zoomSpeedChart('out')">
+                Zoom -
+              </button>
+              <button type="button" class="secondary-button" (click)="zoomSpeedChart('in')">
+                Zoom +
+              </button>
+
+              <label class="chart-field">
+                <span>Zoom</span>
+                <input
+                  type="range"
+                  min="1"
+                  max="24"
+                  step="0.1"
+                  [value]="chartZoomRatio()"
+                  (input)="onChartZoomInput($event)"
+                />
+              </label>
+
+              <label class="chart-field">
+                <span>Deplacement</span>
+                <input
+                  type="range"
+                  min="0"
+                  max="1"
+                  step="0.001"
+                  [value]="chartPanRatio()"
+                  (input)="onChartPanInput($event)"
+                />
+              </label>
+            </div>
+
+            <div class="speed-chart-shell">
+              <div class="speed-chart-axis speed-chart-axis-y">
+                <span>{{ maxSpeedLabel() }}</span>
+                <span>0 km/h</span>
+              </div>
+
+              <div class="speed-chart-stack">
+                <svg viewBox="0 0 960 240" class="speed-chart" aria-label="Courbe de vitesse sur toute la duree de l'activite, axe temps en abscisse et km/h en ordonnee">
+                  <defs>
+                    <linearGradient id="speedArea" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stop-color="#cf5c36" stop-opacity="0.38" />
+                      <stop offset="100%" stop-color="#cf5c36" stop-opacity="0.04" />
+                    </linearGradient>
+                  </defs>
+                  <line x1="0" y1="239" x2="960" y2="239" class="speed-chart-baseline" />
+                  <path [attr.d]="correctedSpeedChartAreaPath()" class="speed-chart-area" />
+                  <path [attr.d]="originalSpeedChartPath()" class="speed-chart-line speed-chart-line-original" />
+                  <path [attr.d]="correctedSpeedChartPath()" class="speed-chart-line speed-chart-line-corrected" />
+                </svg>
+
+                <div class="speed-chart-axis speed-chart-axis-x" aria-hidden="true">
+                  <span>{{ chartStartTimeLabel() }}</span>
+                  <span>{{ chartMidTimeLabel() }}</span>
+                  <span>{{ chartEndTimeLabel() }}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        } @else {
+          <p class="empty-copy chart-empty-copy">
+            Le graphique apparaitra apres import d'un GPX contenant des timestamps exploitables.
+          </p>
+        }
+      </section>
+
+      <section class="map-panel panel">
+        <div class="map-heading">
+          <div>
+            <h2>Carte d'edition</h2>
+            <p>Trace originale en gris, correction exportee en orange.</p>
+          </div>
+          <div class="legend">
+            <span><i class="legend-dot legend-original"></i>Original</span>
+            <span><i class="legend-dot legend-corrected"></i>Corrige</span>
+          </div>
         </div>
-      </div>
 
-      <div #mapHost class="map-host" aria-label="Carte d'edition GPX"></div>
+        <div #mapHost class="map-host" aria-label="Carte d'edition GPX"></div>
 
-      <p class="map-note">
-        Astuce: si le parcours corrige coupe encore au mauvais endroit, ajoutez un point intermediaire en haut de la
-        montee puis un autre au debut de la descente pour pouvoir ralentir ou accelerer chaque troncon separatement.
-      </p>
+        <p class="map-note">
+          Astuce: si le parcours corrige coupe encore au mauvais endroit, ajoutez un point intermediaire en haut de la
+          montee puis un autre au debut de la descente pour pouvoir ralentir ou accelerer chaque troncon separatement.
+        </p>
+      </section>
     </section>
   </section>
 </main>

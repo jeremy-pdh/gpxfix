@@ -40,6 +40,14 @@ export interface GapCorrection {
   generatedPoints: TrackPoint[];
 }
 
+export interface SpeedSample {
+  distanceMeters: number;
+  elapsedSeconds: number;
+  durationSeconds: number;
+  speedKph: number;
+  generated: boolean;
+}
+
 export function parseGpx(content: string): GpxTrack {
   const xml = new DOMParser().parseFromString(content, 'application/xml');
   const parserError = xml.getElementsByTagName('parsererror').item(0);
@@ -97,7 +105,7 @@ export function computeGapCandidates(points: TrackPoint[]): GapCandidate[] {
         score,
       } satisfies GapCandidate;
     })
-    .filter((gap) => gap.distanceMeters >= 25)
+    .filter((gap) => gap.distanceMeters >= 100)
     .sort((left, right) => right.score - left.score)
     .slice(0, 12);
 }
@@ -203,6 +211,66 @@ export function formatDistance(distanceMeters: number): string {
   }
 
   return `${Math.round(distanceMeters)} m`;
+}
+
+export function buildSpeedSamples(points: TrackPoint[]): SpeedSample[] {
+  if (points.length < 2) {
+    return [];
+  }
+
+  const rawSamples: SpeedSample[] = [];
+  let cumulativeDistance = 0;
+  const firstTimestamp = points[0].time?.getTime() ?? null;
+
+  for (let index = 1; index < points.length; index += 1) {
+    const previousPoint = points[index - 1];
+    const point = points[index];
+    const segmentDistance = haversineDistanceMeters(previousPoint, point);
+    cumulativeDistance += segmentDistance;
+
+    if (!previousPoint.time || !point.time || firstTimestamp === null) {
+      continue;
+    }
+
+    const durationSeconds = (point.time.getTime() - previousPoint.time.getTime()) / 1000;
+
+    if (!Number.isFinite(durationSeconds) || durationSeconds <= 0) {
+      continue;
+    }
+
+    rawSamples.push({
+      distanceMeters: cumulativeDistance,
+      elapsedSeconds: Math.max((point.time.getTime() - firstTimestamp) / 1000, 0),
+      durationSeconds,
+      speedKph: (segmentDistance / durationSeconds) * 3.6,
+      generated: previousPoint.source === 'generated' || point.source === 'generated',
+    });
+  }
+
+  return rawSamples.map((sample) => {
+    const windowStart = sample.elapsedSeconds - 15;
+    const windowEnd = sample.elapsedSeconds + 15;
+    let windowDistance = 0;
+    let windowDuration = 0;
+
+    for (const candidate of rawSamples) {
+      const candidateStart = candidate.elapsedSeconds - candidate.durationSeconds;
+      const overlapsWindow = candidate.elapsedSeconds >= windowStart && candidateStart <= windowEnd;
+
+      if (!overlapsWindow) {
+        continue;
+      }
+
+      windowDistance += (candidate.speedKph / 3.6) * candidate.durationSeconds;
+      windowDuration += candidate.durationSeconds;
+    }
+
+    return {
+      ...sample,
+      speedKph:
+        windowDuration > 0 ? (windowDistance / windowDuration) * 3.6 : sample.speedKph,
+    };
+  });
 }
 
 export function haversineDistanceMeters(start: LatLon, end: LatLon): number {

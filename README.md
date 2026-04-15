@@ -1,8 +1,21 @@
 # Gpxfix
 
-This project was generated using [Angular CLI](https://github.com/angular/angular-cli) version 21.2.3.
+Vibe coded project to fix .gpx files for use in Strava. The project is built using Angular and provides a user-friendly interface for uploading and fixing .gpx files.
+
+🇫🇷 Initial prompt (I'm switching QWERTY...):
+
+```
+Je veux que tu implementes une appli web ou je peux importer un fichier .gpx et le corriger quand j'ai mis pause pendant une activite et roublie de resume.
+Donc le but serait de fixer le gpx importe en remettant les points gps sur la route donc il me faut un fond de carte je veux drag and drop ou cliquer sur la carte pour ajouter des points intermediares pour corriger mon gpx
+Je veux aussi pouvoir regler finement le temps de ces nouveaux points gpx creer pendant que le record etait en pause car si jetais en montee a velo c'est plus lent aue la descente donc il me faut la feature d'interpolation de temps a l'endroit ou je fix le gpx lineaire par defaut mais reglable par la suite
+Si tu peux tout faire avec une seule page web static sans client server architecture c'est prefereable
+J'ai une preference si tu utilises angular avec un setup minimal
+```
+
 
 ## Development server
+
+This project was generated using [Angular CLI](https://github.com/angular/angular-cli) version 21.2.3.
 
 To start a local development server, run:
 

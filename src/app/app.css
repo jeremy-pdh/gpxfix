@@ -237,16 +237,27 @@ h1 {
 	grid-template-columns: minmax(360px, 420px) minmax(0, 1fr);
 	gap: 1rem;
 	min-height: min(78dvh, 980px);
+	align-items: stretch;
 }
 
 .sidebar {
 	display: grid;
 	gap: 1rem;
 	align-content: start;
+	min-height: 0;
+}
+
+.canvas-column {
+	display: grid;
+	gap: 1rem;
+	min-width: 0;
+	min-height: 0;
+	align-content: start;
 }
 
 .panel {
 	padding: 1rem;
+	min-width: 0;
 }
 
 .stats-panel,
@@ -315,6 +326,25 @@ h1 {
 	gap: 0.7rem;
 }
 
+.gap-list {
+	max-height: min(42dvh, 30rem);
+	overflow: auto;
+	padding-right: 0.3rem;
+	scrollbar-width: thin;
+	scrollbar-color: rgba(207, 92, 54, 0.6) transparent;
+}
+
+.gap-list::-webkit-scrollbar {
+	width: 10px;
+}
+
+.gap-list::-webkit-scrollbar-thumb {
+	border-radius: 999px;
+	background: rgba(207, 92, 54, 0.55);
+	border: 2px solid transparent;
+	background-clip: content-box;
+}
+
 .gap-card {
 	display: grid;
 	grid-template-columns: 1.35fr repeat(3, minmax(0, auto));
@@ -360,9 +390,11 @@ h1 {
 
 .map-panel {
 	display: grid;
-	grid-template-rows: auto minmax(420px, 1fr) auto;
+	grid-template-rows: auto auto minmax(420px, 1fr) auto;
 	gap: 1rem;
 	min-width: 0;
+	min-height: 0;
+	align-self: stretch;
 }
 
 .legend {
@@ -397,7 +429,7 @@ h1 {
 .map-host {
 	width: 100%;
 	height: 100%;
-	min-height: 420px;
+	min-height: clamp(420px, 55dvh, 980px);
 	border-radius: 24px;
 	overflow: hidden;
 	border: 1px solid var(--line);
@@ -405,6 +437,146 @@ h1 {
 
 .map-host.map-adding {
 	cursor: crosshair;
+}
+
+.speed-panel {
+	display: grid;
+	gap: 0.9rem;
+	padding: 1rem;
+	border: 1px solid var(--line);
+	border-radius: 24px;
+	background: rgba(255, 255, 255, 0.55);
+}
+
+.speed-panel-content {
+	display: grid;
+	gap: 0.9rem;
+}
+
+.chart-empty-copy {
+	padding: 1rem;
+	border: 1px dashed var(--line-strong);
+	border-radius: 18px;
+	background: rgba(255, 255, 255, 0.5);
+}
+
+.chart-quick-stats {
+	display: flex;
+	gap: 1rem;
+	flex-wrap: wrap;
+	font-size: 0.88rem;
+	color: var(--ink-700);
+}
+
+.chart-legend {
+	display: flex;
+	gap: 1rem;
+	flex-wrap: wrap;
+	font-size: 0.88rem;
+	color: var(--ink-700);
+}
+
+.chart-legend span {
+	display: inline-flex;
+	gap: 0.45rem;
+	align-items: center;
+}
+
+.chart-toolbar {
+	display: grid;
+	grid-template-columns: auto auto minmax(180px, 1fr) minmax(180px, 1fr);
+	gap: 0.75rem;
+	align-items: end;
+}
+
+.chart-field {
+	display: grid;
+	gap: 0.35rem;
+	font-size: 0.82rem;
+	font-weight: 700;
+	color: var(--ink-700);
+}
+
+.chart-field input {
+	width: 100%;
+	accent-color: var(--accent-700);
+}
+
+.speed-chart-shell {
+	display: grid;
+	grid-template-columns: auto minmax(0, 1fr);
+	gap: 0.9rem;
+	align-items: stretch;
+	min-height: 260px;
+}
+
+.speed-chart-stack {
+	display: grid;
+	grid-template-rows: minmax(0, 1fr) auto;
+	gap: 0.55rem;
+	min-width: 0;
+}
+
+.speed-chart-axis {
+	display: flex;
+	font-size: 0.78rem;
+	color: var(--ink-700);
+}
+
+.speed-chart-axis-y {
+	flex-direction: column;
+	justify-content: space-between;
+	padding-block: 0.35rem;
+}
+
+.speed-chart-axis-x {
+	justify-content: space-between;
+	padding-inline: 0.2rem;
+}
+
+.speed-chart {
+	width: 100%;
+	height: 260px;
+	display: block;
+	border-radius: 20px;
+	background:
+		linear-gradient(180deg, rgba(255, 255, 255, 0.78), rgba(255, 255, 255, 0.36)),
+		repeating-linear-gradient(
+			180deg,
+			rgba(23, 33, 43, 0.04) 0,
+			rgba(23, 33, 43, 0.04) 1px,
+			transparent 1px,
+			transparent 48px
+		);
+	border: 1px solid var(--line);
+	overflow: hidden;
+}
+
+.speed-chart-baseline {
+	stroke: rgba(23, 33, 43, 0.22);
+	stroke-width: 1;
+}
+
+.speed-chart-area {
+	fill: url(#speedArea);
+}
+
+.speed-chart-line {
+	fill: none;
+	stroke-width: 3;
+	stroke-linecap: round;
+	stroke-linejoin: round;
+}
+
+.speed-chart-line-original {
+	stroke: #5e7285;
+	stroke-opacity: 0.9;
+	stroke-width: 2.5;
+}
+
+.speed-chart-line-corrected {
+	stroke: #cf5c36;
+	stroke-width: 3.5;
 }
 
 @media (max-width: 1180px) {
@@ -443,5 +615,14 @@ h1 {
 	.stats-grid,
 	.detail-grid {
 		grid-template-columns: 1fr;
+	}
+
+	.chart-toolbar,
+	.speed-chart-shell {
+		grid-template-columns: 1fr;
+	}
+
+	.speed-chart-axis-x {
+		font-size: 0.72rem;
 	}
 }
