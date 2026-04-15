@@ -1,0 +1,261 @@
+<input
+  #fileInput
+  accept=".gpx,application/gpx+xml,application/xml,text/xml"
+  type="file"
+  class="visually-hidden"
+  (change)="onFileSelected($event)"
+/>
+
+<main class="shell">
+  <section class="hero">
+    <div>
+      <p class="eyebrow">gpxfix</p>
+      <h1>Recaler un saut GPX sur la route, puis redistribuer le temps.</h1>
+      <p class="intro">
+        Importez un fichier GPX, choisissez un saut suspect, ajoutez ou deplacez des points
+        intermediaires sur la carte, puis ajustez le temps par troncon avant export.
+      </p>
+    </div>
+
+    <div
+      class="dropzone"
+      [class.dropzone-active]="dropActive()"
+      (click)="openFilePicker()"
+      (dragover)="onDragOver($event)"
+      (dragleave)="onDragLeave()"
+      (drop)="onFileDrop($event)"
+    >
+      <p class="dropzone-title">Deposer un GPX ici</p>
+      <p class="dropzone-copy">ou cliquer pour choisir un fichier</p>
+      <button type="button" class="primary-button">Importer un GPX</button>
+      @if (sourceFileName()) {
+        <p class="dropzone-file">{{ sourceFileName() }}.gpx</p>
+      }
+    </div>
+  </section>
+
+  <section class="toolbar">
+    <div class="toolbar-group status-pill">{{ statusMessage() }}</div>
+
+    <div class="toolbar-group toolbar-actions">
+      <label class="profile-picker">
+        <span>Profil</span>
+        <select [value]="activeRouteProfile()" (change)="changeRouteProfile($event)">
+          <option value="cycling">Velo</option>
+          <option value="walking">Marche</option>
+          <option value="driving">Route</option>
+        </select>
+      </label>
+
+      <button type="button" class="secondary-button" (click)="zoomToTrack()" [disabled]="!hasUsableTrack()">
+        Voir tout
+      </button>
+      <button type="button" class="secondary-button" (click)="zoomToSelection()" [disabled]="!selectedGap()">
+        Zoom segment
+      </button>
+      <button type="button" class="primary-button" (click)="exportCorrectedTrack()" [disabled]="!hasUsableTrack()">
+        Exporter GPX corrige
+      </button>
+    </div>
+  </section>
+
+  @if (errorMessage()) {
+    <p class="message error-message">{{ errorMessage() }}</p>
+  }
+  @if (loadingRoute()) {
+    <p class="message loading-message">Requete de routage en cours...</p>
+  }
+
+  <section class="workspace">
+    <aside class="sidebar">
+      @if (track(); as track) {
+        <section class="panel stats-panel">
+          <div class="panel-heading">
+            <h2>Resume</h2>
+            <p>{{ track.points.length }} points originaux</p>
+          </div>
+
+          <div class="stats-grid">
+            <article>
+              <span>Nom</span>
+              <strong>{{ track.name }}</strong>
+            </article>
+            <article>
+              <span>Sauts proposes</span>
+              <strong>{{ gapCandidates().length }}</strong>
+            </article>
+            <article>
+              <span>Corrections actives</span>
+              <strong>{{ hasCorrections() ? correctedPoints().length - track.points.length : 0 }} points ajoutes</strong>
+            </article>
+          </div>
+        </section>
+
+        <section class="panel list-panel">
+          <div class="panel-heading">
+            <h2>Sauts suspects</h2>
+            <p>Classes par severite distance + vitesse</p>
+          </div>
+
+          <div class="gap-list" role="list">
+            @for (gap of gapCandidates(); track gap.startIndex) {
+              <button
+                type="button"
+                class="gap-card"
+                [class.gap-card-active]="selectedGap()?.startIndex === gap.startIndex"
+                (click)="selectGap(gap)"
+              >
+                <span class="gap-card-title">{{ segmentLabel(gap) }}</span>
+                <span>{{ formatDistance(gap.distanceMeters) }}</span>
+                <span>{{ formatDuration(gap.durationSeconds) }}</span>
+                <span>{{ gap.speedKph ? gap.speedKph.toFixed(1) + ' km/h' : 'n/a' }}</span>
+              </button>
+            } @empty {
+              <p class="empty-copy">Aucun saut evident detecte. Vous pouvez quand meme exporter le GPX tel quel.</p>
+            }
+          </div>
+        </section>
+
+        @if (selectedGap(); as gap) {
+          @if (selectedCorrection(); as correction) {
+            <section class="panel editor-panel">
+              <div class="panel-heading">
+                <h2>Segment en cours</h2>
+                <p>{{ segmentLabel(gap) }}</p>
+              </div>
+
+              <div class="detail-grid">
+                <article>
+                  <span>Avant pause</span>
+                  <strong>{{ formatTime(track.points[gap.startIndex].time) }}</strong>
+                </article>
+                <article>
+                  <span>Apres pause</span>
+                  <strong>{{ formatTime(track.points[gap.endIndex].time) }}</strong>
+                </article>
+                <article>
+                  <span>Saut original</span>
+                  <strong>{{ formatDistance(gap.distanceMeters) }}</strong>
+                </article>
+                <article>
+                  <span>Duree disponible</span>
+                  <strong>{{ formatDuration(gap.durationSeconds) }}</strong>
+                </article>
+                <article>
+                  <span>Trace recalculee</span>
+                  <strong>{{ formatDistance(correction.snappedDistanceMeters) }}</strong>
+                </article>
+                <article>
+                  <span>Duree routage</span>
+                  <strong>{{ formatDuration(correction.snappedDurationSeconds) }}</strong>
+                </article>
+              </div>
+
+              <div class="editor-actions">
+                <button type="button" class="primary-button" (click)="toggleWaypointMode()">
+                  {{ addWaypointMode() ? 'Terminer ajout points' : 'Ajouter des points sur la carte' }}
+                </button>
+                <button type="button" class="secondary-button" (click)="resetCurrentCorrection()">
+                  Reinitialiser ce segment
+                </button>
+              </div>
+
+              <p class="hint-copy">
+                Cliquez sur la carte pour ajouter des points intermediaires, puis faites-les glisser pour
+                affiner le passage exact sur la route.
+              </p>
+
+              <section class="subpanel">
+                <div class="subpanel-heading">
+                  <h3>Points intermediaires</h3>
+                  <p>{{ correction.controlPoints.length }} point(s)</p>
+                </div>
+
+                @if (correction.controlPoints.length > 0) {
+                  <div class="waypoint-list">
+                    @for (waypoint of correction.controlPoints; track $index) {
+                      <article class="waypoint-row">
+                        <div>
+                          <strong>Point {{ $index + 1 }}</strong>
+                          <p>{{ waypoint.lat.toFixed(5) }}, {{ waypoint.lon.toFixed(5) }}</p>
+                        </div>
+                        <button type="button" class="ghost-button" (click)="removeWaypoint($index)">
+                          Supprimer
+                        </button>
+                      </article>
+                    }
+                  </div>
+                } @else {
+                  <p class="empty-copy">Ajoutez un ou plusieurs points si le recalage automatique ne suit pas la bonne route.</p>
+                }
+              </section>
+
+              @if (correction.snappedLegs.length > 0) {
+                <section class="subpanel">
+                  <div class="subpanel-heading">
+                    <h3>Interpolation du temps</h3>
+                    <p>Plus le poids est eleve, plus ce troncon prend de temps.</p>
+                  </div>
+
+                  <div class="leg-list">
+                    @for (leg of correction.snappedLegs; track $index) {
+                      <article class="leg-card">
+                        <div class="leg-header">
+                          <strong>Troncon {{ $index + 1 }}</strong>
+                          <span>{{ formatDistance(leg.distanceMeters) }}</span>
+                        </div>
+                        <label class="slider-field">
+                          <span>Poids temporel {{ correction.legWeights[$index].toFixed(1) }}</span>
+                          <input
+                            type="range"
+                            min="0.3"
+                            max="4"
+                            step="0.1"
+                            [value]="correction.legWeights[$index]"
+                            (input)="updateLegWeight($index, $event)"
+                          />
+                        </label>
+                        <p class="leg-meta">Temps attribue: {{ formatDuration(selectedLegDurations()[$index]) }}</p>
+                      </article>
+                    }
+                  </div>
+                </section>
+              }
+            </section>
+          }
+        }
+      } @else {
+        <section class="panel empty-panel">
+          <h2>Une seule page, aucun backend</h2>
+          <p>
+            L'application tourne cote navigateur. Le fond de carte vient d'OpenStreetMap et le recalage
+            utilise le service de routage public OSRM pour retrouver une route plausible entre deux points.
+          </p>
+          <p>
+            Commencez par importer un GPX depuis la zone de depot en haut de page.
+          </p>
+        </section>
+      }
+    </aside>
+
+    <section class="map-panel panel">
+      <div class="map-heading">
+        <div>
+          <h2>Carte d'edition</h2>
+          <p>Trace originale en gris, correction exportee en orange.</p>
+        </div>
+        <div class="legend">
+          <span><i class="legend-dot legend-original"></i>Original</span>
+          <span><i class="legend-dot legend-corrected"></i>Corrige</span>
+        </div>
+      </div>
+
+      <div #mapHost class="map-host" aria-label="Carte d'edition GPX"></div>
+
+      <p class="map-note">
+        Astuce: si le parcours corrige coupe encore au mauvais endroit, ajoutez un point intermediaire en haut de la
+        montee puis un autre au debut de la descente pour pouvoir ralentir ou accelerer chaque troncon separatement.
+      </p>
+    </section>
+  </section>
+</main>
